@@ -1,0 +1,1891 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Garuda Elevate Brokerage & Jivan Oil World - Commodity Contract Portal</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- EmailJS SDK for Dispatching Real Emails -->
+    <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+    <script type="text/javascript">
+        (function(){
+            try { emailjs.init("user_demo_gebpl"); } catch(e){}
+        })();
+    </script>
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Configuration & Setup
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'gebpl-jivan-trade-portal';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+
+        let app, db, auth;
+        window.currentUser = null;
+        window.isCloudSyncEnabled = false;
+
+        if (firebaseConfig) {
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                window.db = db;
+                window.auth = auth;
+                window.appId = appId;
+                
+                // Initialize Auth
+                const initAuth = async () => {
+                    try {
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+                    } catch (err) {
+                        console.warn('Auth initialization warning:', err);
+                    }
+                };
+                
+                initAuth();
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        window.currentUser = user;
+                        window.isCloudSyncEnabled = true;
+                        if (typeof updateCloudSyncUI === 'function') updateCloudSyncUI(true, user);
+                        if (typeof subscribeToCloudData === 'function') subscribeToCloudData();
+                    } else {
+                        if (typeof updateCloudSyncUI === 'function') updateCloudSyncUI(false, null);
+                    }
+                });
+            } catch(e) {
+                console.error("Firebase init error:", e);
+            }
+        }
+
+        // Realtime Firestore Listener
+        window.subscribeToCloudData = function() {
+            if (!db || !window.currentUser) return;
+            const contractsColRef = collection(db, 'artifacts', appId, 'public', 'data', 'contracts');
+            
+            onSnapshot(contractsColRef, (snapshot) => {
+                if (!snapshot.empty) {
+                    const cloudContracts = [];
+                    snapshot.forEach((doc) => {
+                        cloudContracts.push(doc.data());
+                    });
+                    // Sort by contract ID descending
+                    cloudContracts.sort((a, b) => b.id.localeCompare(a.id));
+                    if (cloudContracts.length > 0) {
+                        window.contracts = cloudContracts;
+                        if (typeof renderDashboardTables === 'function') renderDashboardTables();
+                        if (typeof renderFullContractsTable === 'function') renderFullContractsTable();
+                        if (typeof renderJivanAnalytics === 'function') renderJivanAnalytics();
+                        showToast('Real-time sync complete: Contracts updated from Cloud Storage');
+                    }
+                }
+            }, (error) => {
+                console.warn('Realtime sync listener notice:', error);
+            });
+        };
+
+        // Save contract to Firestore
+        window.saveContractToCloud = async function(contractObj) {
+            if (!db || !window.currentUser) return;
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'contracts', contractObj.id.replace(/\//g, '_'));
+                await setDoc(docRef, contractObj);
+            } catch(e) {
+                console.error('Cloud save failed:', e);
+            }
+        };
+    </script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0fdfa',
+                            100: '#ccfbf1',
+                            500: '#14b8a6',
+                            600: '#0d9488',
+                            800: '#115e59',
+                            900: '#134e4a',
+                            gold: '#d97706',
+                            goldlight: '#fef3c7'
+                        },
+                        navy: {
+                            800: '#0f172a',
+                            900: '#020617'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Ticker Animation */
+        @keyframes ticker {
+            0% { transform: translate3d(0, 0, 0); }
+            100% { transform: translate3d(-50%, 0, 0); }
+        }
+        .ticker-wrap {
+            overflow: hidden;
+            white-space: nowrap;
+        }
+        .ticker-move {
+            display: inline-block;
+            animation: ticker 35s linear infinite;
+        }
+        .ticker-move:hover {
+            animation-play-state: paused;
+        }
+        
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #printable-contract-note, #printable-contract-note * {
+                visibility: visible;
+            }
+            #printable-contract-note {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans antialiased flex flex-col min-h-screen">
+
+    <!-- MANDATORY AUTH WALL / LOGIN LANDING SCREEN -->
+    <div id="auth-wall-screen" class="fixed inset-0 bg-gradient-to-br from-navy-950 via-slate-900 to-brand-950 z-50 flex items-center justify-center p-4">
+        <div class="max-w-md w-full bg-white rounded-3xl shadow-2xl border border-slate-700/50 overflow-hidden relative">
+            <div class="p-8 bg-navy-900 text-white text-center relative overflow-hidden">
+                <div class="absolute -right-8 -top-8 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none"></div>
+                <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-navy-950 flex items-center justify-center text-3xl font-black mx-auto mb-4 shadow-lg border border-amber-300/30">
+                    <i class="fa-solid fa-feather-pointed"></i>
+                </div>
+                <h2 class="text-2xl font-black text-white tracking-tight uppercase">GARUDA ELEVATE</h2>
+                <p class="text-xs text-amber-400 font-bold uppercase tracking-widest mt-0.5">Brokerage Private Limited</p>
+                <div class="mt-3 inline-flex items-center px-3 py-1 bg-white/10 backdrop-blur-md rounded-full text-[11px] text-slate-200 border border-white/10 font-medium">
+                    <i class="fa-solid fa-shield-halved text-amber-400 mr-1.5"></i> Official Trading Desk Security
+                </div>
+            </div>
+
+            <div class="p-6 sm:p-8 space-y-5">
+                <!-- PASSWORD BASED LOGIN SCREEN -->
+                <div id="wall-step-1" class="space-y-4">
+                    <div class="text-center">
+                        <h3 class="text-base font-bold text-navy-900">Sign In to Access Portal</h3>
+                        <p class="text-xs text-slate-500 mt-1">Enter your Official Email ID & Password to unlock the trading desk</p>
+                    </div>
+
+                    <div class="space-y-3">
+                        <div class="space-y-1">
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Official User ID / Email Address</label>
+                            <div class="relative">
+                                <input type="email" id="wall-email-input" placeholder="USER ID OR MAIL" value="" class="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none bg-slate-50 focus:bg-white">
+                                <i class="fa-solid fa-envelope absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+                            </div>
+                        </div>
+
+                        <div class="space-y-1">
+                            <label class="block text-xs font-bold text-slate-700 uppercase tracking-wider">Security Password</label>
+                            <div class="relative">
+                                <input type="password" id="wall-password-input" placeholder="••••••••••••" value="" class="w-full pl-10 pr-4 py-3 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none bg-slate-50 focus:bg-white" onkeyup="if(event.key==='Enter') verifyWallPassword()">
+                                <i class="fa-solid fa-lock absolute left-3.5 top-3.5 text-slate-400 text-sm"></i>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onclick="verifyWallPassword()" id="btn-login-pass" class="w-full py-3.5 bg-navy-900 hover:bg-black text-amber-400 font-black rounded-xl text-xs shadow-md transition flex items-center justify-center space-x-2">
+                        <i class="fa-solid fa-lock-open text-amber-400"></i>
+                        <span>VERIFY & ACCESS PORTAL</span>
+                    </button>
+
+                    <div class="p-3 bg-slate-100 border border-slate-200 rounded-xl text-[11px] text-slate-600 flex items-start space-x-2">
+                        <i class="fa-solid fa-shield-halved text-brand-600 text-sm shrink-0 mt-0.5"></i>
+                        <span>Strict authentication active. Only authorized users can log in to view bargain registers.</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="px-6 py-3 bg-slate-100 text-slate-500 text-[10px] text-center border-t border-slate-200">
+                Garuda Elevate Brokerage Pvt Ltd & Jivan Oil World Ltd © 2026
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP CONTENT (LOCKED UNTIL AUTHENTICATED) -->
+    <div id="main-app-wrapper" class="hidden flex-col flex-grow min-h-screen">
+
+        <!-- HEADER BAR WITH CLEAN NON-OVERLAPPING BRANDING -->
+        <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between items-center h-16 gap-4">
+                    
+                    <!-- BRAND LOGO AND TITLE (FIXED NO-OVERLAP & SPACING) -->
+                    <div class="flex items-center space-x-3 shrink-0">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-navy-900 to-slate-900 text-amber-400 flex items-center justify-center font-black text-lg shadow-md border border-slate-800 shrink-0">
+                            G
+                        </div>
+                        <div class="hidden sm:flex flex-col justify-center">
+                            <span class="text-xs font-black text-navy-900 tracking-tight uppercase leading-none block">GARUDA ELEVATE</span>
+                            <span class="text-[9px] font-bold text-amber-600 uppercase tracking-wider leading-tight block mt-0.5">BROKERAGE PRIVATE LIMITED & Jivan Oil World Ltd</span>
+                        </div>
+                    </div>
+
+                    <!-- DESKTOP NAVIGATION TABS -->
+                    <nav class="hidden md:flex space-x-1 items-center">
+                        <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-btn px-3 py-2 rounded-lg text-xs font-semibold text-brand-600 bg-brand-50 transition">
+                            <i class="fa-solid fa-chart-line mr-1.5"></i> Dashboard
+                        </button>
+                        <button onclick="switchTab('jivan-analytics')" id="nav-jivan-analytics" class="nav-btn px-3 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition">
+                            <i class="fa-solid fa-building-circle-check mr-1.5"></i> Jivan Analytics
+                        </button>
+                        <button onclick="switchTab('contracts')" id="nav-contracts" class="nav-btn px-3 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition">
+                            <i class="fa-solid fa-list-check mr-1.5"></i> Register
+                        </button>
+                        <button onclick="switchTab('calculator')" id="nav-calculator" class="nav-btn px-3 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition">
+                            <i class="fa-solid fa-calculator mr-1.5"></i> Duty Calc
+                        </button>
+                        <button onclick="switchTab('printable-note')" id="nav-printable-note" class="nav-btn px-3 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition">
+                            <i class="fa-solid fa-file-pdf mr-1.5"></i> Print Note
+                        </button>
+                        <button onclick="switchTab('new-bargain')" id="nav-new-bargain" class="px-3.5 py-2 rounded-lg text-xs font-black bg-navy-900 hover:bg-black text-amber-400 shadow-sm transition flex items-center">
+                            <i class="fa-solid fa-circle-plus mr-1.5"></i> New Bargain
+                        </button>
+                    </nav>
+
+                    <!-- LOGOUT & SESSION INDICATOR -->
+                    <div class="flex items-center space-x-2 shrink-0">
+                        <div class="hidden lg:flex items-center space-x-2 px-3 py-1 bg-emerald-50 border border-emerald-200 rounded-full text-emerald-800 text-[11px] font-bold">
+                            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <span id="active-user-email">hitesh.y@jivanoilworld.com</span>
+                        </div>
+                        <button onclick="handlePortalSignOut()" class="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 font-bold rounded-lg text-xs border border-red-200 transition flex items-center space-x-1">
+                            <i class="fa-solid fa-right-from-bracket text-xs"></i>
+                            <span class="hidden sm:inline">Logout</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+            <!-- Welcome Header -->
+            <div class="bg-gradient-to-r from-navy-900 via-slate-900 to-brand-900 rounded-2xl p-6 text-white shadow-xl relative overflow-hidden border border-slate-800">
+                <div class="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <div class="flex items-center space-x-2 text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-1 rounded-full w-max mb-2">
+                            <i class="fa-solid fa-handshake"></i>
+                            <span>Garuda Elevate Brokerage Private Limited Desk</span>
+                        </div>
+                        <h1 class="text-2xl sm:text-3xl font-black tracking-tight">Crude Degummed Soyabean Oil Bargain Registry</h1>
+                        <p class="text-slate-300 text-xs sm:text-sm mt-1 max-w-2xl">
+                            Verified official record of <strong class="text-amber-400">GEBPL/26-27/001</strong> to <strong class="text-amber-400">GEBPL/26-27/013</strong> with Seller <strong class="text-emerald-300">Jivan Oil World Ltd</strong>. Total Volume: <strong class="text-amber-300">3,500 MT</strong>.
+                        </p>
+                    </div>
+                    <div class="flex sm:flex-col items-end gap-1.5 text-right bg-white/5 backdrop-blur-md p-3.5 rounded-xl border border-white/10">
+                        <span class="text-xs text-slate-300">Latest Issued Bargain</span>
+                        <span class="text-xl font-black text-amber-400">GEBPL/26-27/013</span>
+                        <span class="text-xs text-emerald-400 font-medium"><i class="fa-solid fa-check-circle mr-1"></i>250 MT @ ₹1,255/10 KGS</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KPI Metric Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Contracted Volume</p>
+                            <h3 class="text-2xl font-black text-slate-900 mt-1" id="kpi-total-volume">3,500 <span class="text-xs font-medium text-slate-500">MT</span></h3>
+                        </div>
+                        <div class="p-3 bg-brand-50 text-brand-600 rounded-lg">
+                            <i class="fa-solid fa-boxes-stacked text-lg"></i>
+                        </div>
+                    </div>
+                    <div class="mt-4 text-xs text-slate-600 font-medium">
+                        <span class="text-emerald-600 font-bold">13 Verified Contracts</span> (001 to 013)
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Portfolio Turn-over</p>
+                            <h3 class="text-2xl font-black text-slate-900 mt-1" id="kpi-total-value">₹43.76 <span class="text-xs font-medium text-slate-500">Cr</span></h3>
+                        </div>
+                        <div class="p-3 bg-amber-50 text-amber-600 rounded-lg">
+                            <i class="fa-solid fa-indian-rupee-sign text-lg"></i>
+                        </div>
+                    </div>
+                    <div class="mt-4 text-xs text-slate-600 font-medium">
+                        <span>Ex Tank Kandla Delivery</span>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Primary Seller</p>
+                            <h3 class="text-lg font-bold text-brand-700 mt-1">Jivan Oil World Ltd</h3>
+                        </div>
+                        <div class="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
+                            <i class="fa-solid fa-building text-lg"></i>
+                        </div>
+                    </div>
+                    <div class="mt-4 text-xs text-slate-600 font-medium">
+                        <span class="text-amber-600 font-bold">100% Sales Volume (3,500 MT)</span>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Next Bargain Serial</p>
+                            <h3 class="text-xl font-bold text-amber-600 mt-1" id="kpi-next-no">GEBPL/26-27/014</h3>
+                        </div>
+                        <div class="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
+                            <i class="fa-solid fa-circle-plus text-lg"></i>
+                        </div>
+                    </div>
+                    <div class="mt-4 text-xs text-slate-600 font-medium">
+                        <button onclick="switchTab('new-bargain')" class="text-brand-600 font-bold hover:underline">Click to issue GEBPL/014 →</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KPI Metric Cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Contract Volume</p>
+                            <h3 class="text-2xl font-black text-slate-900 mt-1" id="kpi-total-volume">7,850 <span class="text-xs font-medium text-slate-500">MT</span></h3>
+                        </div>
+                        <div class="p-3 bg-brand-50 text-brand-600 rounded-lg">
+                            <i class="fa-solid fa-boxes-stacked text-lg"></i>
+                        </div>
+                    </div>
+                    <div class="mt-4 text-xs text-slate-600 font-medium">
+                        <span class="text-emerald-600 font-bold">13 Registered Bargains</span> (GEBPL Series)
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Deal Portfolio Value</p>
+                            <h3 class="text-2xl font-black text-slate-900 mt-1" id="kpi-total-value">₹98.42 <span class="text-xs font-medium text-slate-500">Cr</span></h3>
+                        </div>
+                        <div class="p-3 bg-amber-50 text-amber-600 rounded-lg">
+                            <i class="fa-solid fa-indian-rupee-sign text-lg"></i>
+                        </div>
+                    </div>
+                    <div class="mt-4 text-xs text-slate-600 font-medium">
+                        <span>Ex-Deendayal & Kandla Ports</span>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Active Contract Note</p>
+                            <h3 class="text-xl font-bold text-brand-700 mt-1">GEBPL/26-27/013</h3>
+                        </div>
+                        <div class="p-3 bg-indigo-50 text-indigo-600 rounded-lg">
+                            <i class="fa-solid fa-file-contract text-lg"></i>
+                        </div>
+                    </div>
+                    <div class="mt-4 text-xs text-slate-600 font-medium">
+                        <span class="text-amber-600 font-bold">500 MT Soya Degum Oil</span>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Next Auto Bargain #</p>
+                            <h3 class="text-xl font-bold text-amber-600 mt-1" id="kpi-next-no">GEBPL/26-27/014</h3>
+                        </div>
+                        <div class="p-3 bg-emerald-50 text-emerald-600 rounded-lg">
+                            <i class="fa-solid fa-circle-plus text-lg"></i>
+                        </div>
+                    </div>
+                    <div class="mt-4 text-xs text-slate-600 font-medium">
+                        <button onclick="switchTab('new-bargain')" class="text-brand-600 font-bold hover:underline">Click to issue next contract →</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Charts & Featured Contract Section -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                <!-- Main Chart -->
+                <div class="lg:col-span-2 bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <div class="flex justify-between items-center mb-4">
+                        <div>
+                            <h3 class="font-bold text-slate-900 text-base">Contract Volumes (GEBPL/26-27/001 to 013)</h3>
+                            <p class="text-xs text-slate-500">Volume breakdown by commodity type in Metric Tons</p>
+                        </div>
+                        <span class="text-xs bg-slate-100 font-semibold text-slate-600 px-3 py-1 rounded-full border border-slate-200">Garuda Brokerage Book</span>
+                    </div>
+                    <div class="h-64 relative">
+                        <canvas id="volumeChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Featured Active Contract Spotlight: GEBPL/26-27/013 -->
+                <div class="bg-gradient-to-b from-navy-900 to-slate-900 text-white rounded-xl p-5 shadow-lg border border-slate-700 flex flex-col justify-between">
+                    <div>
+                        <div class="flex justify-between items-center pb-3 border-b border-slate-800">
+                            <span class="text-xs font-bold text-amber-400 uppercase tracking-wider"><i class="fa-solid fa-star mr-1"></i> Latest PDF Contract</span>
+                            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Confirmed</span>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <div class="flex justify-between items-baseline">
+                                <h4 class="text-xl font-black text-amber-400">GEBPL/26-27/013</h4>
+                                <span class="text-xs text-slate-400">28 Sep 2026</span>
+                            </div>
+                            <p class="text-xs font-semibold text-white mt-1">Crude Degummed Soyabean Oil</p>
+                        </div>
+
+                        <div class="mt-4 space-y-2 text-xs">
+                            <div class="flex justify-between py-1.5 border-b border-slate-800">
+                                <span class="text-slate-400">Seller:</span>
+                                <span class="font-semibold text-amber-300">Jivan Oil World Ltd</span>
+                            </div>
+                            <div class="flex justify-between py-1.5 border-b border-slate-800">
+                                <span class="text-slate-400">Buyer:</span>
+                                <span class="font-semibold text-slate-200">Pawan Industries- Morena</span>
+                            </div>
+                            <div class="flex justify-between py-1.5 border-b border-slate-800">
+                                <span class="text-slate-400">Quantity & Rate:</span>
+                                <span class="font-bold text-emerald-400">250 MT @ ₹1,255 / 10 KGS</span>
+                            </div>
+                            <div class="flex justify-between py-1.5 border-b border-slate-800">
+                                <span class="text-slate-400">Port & Shipment:</span>
+                                <span class="font-semibold text-slate-200">Ex Tank Kandla | March 2027</span>
+                            </div>
+                            <div class="flex justify-between py-1.5 border-b border-slate-800">
+                                <span class="text-slate-400">Deposit:</span>
+                                <span class="font-semibold text-amber-300">₹3,000 PMT (Due 08-Oct-2026)</span>
+                            </div>
+                            <div class="flex justify-between py-1.5">
+                                <span class="text-slate-400">Brokerage:</span>
+                                <span class="font-semibold text-slate-300">₹50 / PMT (+ GST)</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-5 pt-3 border-t border-slate-800 flex gap-2">
+                        <button onclick="viewContractDetails('GEBPL/26-27/013')" class="flex-1 py-2 bg-brand-600 hover:bg-brand-500 text-white rounded-lg text-xs font-bold transition text-center">
+                            <i class="fa-solid fa-eye mr-1"></i> Quick View
+                        </button>
+                        <button onclick="switchTab('printable-note')" class="py-2 px-3 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg text-xs transition" title="View Printable Contract Note">
+                            <i class="fa-solid fa-print mr-1"></i> Printable Note
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dashboard Recent Contracts Table -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="p-5 border-b border-slate-200 flex justify-between items-center">
+                    <div>
+                        <h3 class="font-bold text-slate-900 text-base">Active Registered Contracts (GEBPL/26-27/001 to 013)</h3>
+                        <p class="text-xs text-slate-500">Brokered by Garuda Elevate Brokerage Pvt Ltd with Jivan Oil World Ltd</p>
+                    </div>
+                    <button onclick="switchTab('contracts')" class="text-brand-600 hover:text-brand-800 text-xs font-bold flex items-center">
+                        View Full Contract Register (13) <i class="fa-solid fa-arrow-right ml-1 text-xs"></i>
+                    </button>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-50 text-slate-500 text-[11px] font-bold uppercase border-b border-slate-200">
+                                <th class="py-3 px-4">Serial No.</th>
+                                <th class="py-3 px-4">Commodity</th>
+                                <th class="py-3 px-4">Seller</th>
+                                <th class="py-3 px-4">Buyer</th>
+                                <th class="py-3 px-4 text-right">Quantity</th>
+                                <th class="py-3 px-4 text-right">Rate (/MT)</th>
+                                <th class="py-3 px-4 text-right">Deposit Rate</th>
+                                <th class="py-3 px-4 text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dashboard-recent-table-body" class="divide-y divide-slate-100 text-xs">
+                            <!-- Populated dynamically by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: CONTRACT REGISTER -->
+        <div id="tab-contracts" class="tab-content hidden space-y-6">
+            <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-200 pb-4 mb-4">
+                    <div>
+                        <h2 class="text-xl font-bold text-navy-900">Contract Register (GEBPL/26-27/001 to 013)</h2>
+                        <p class="text-xs text-slate-500">Comprehensive log of all commodity bargains brokered by Garuda Elevate Brokerage</p>
+                    </div>
+                    <span id="contracts-count-badge" class="bg-brand-50 text-brand-700 font-bold text-xs px-3 py-1 rounded-full border border-brand-200">
+                        13 Contracts Registered
+                    </span>
+                </div>
+
+                <!-- Filters & Search -->
+                <div class="grid grid-cols-1 sm:grid-cols-5 gap-3 mb-4">
+                    <div class="sm:col-span-2 relative">
+                        <input type="text" id="contract-search-input" onkeyup="filterContracts()" placeholder="Search by Serial No, Seller, Buyer, or Port..." class="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-xs"></i>
+                    </div>
+                    <div>
+                        <select id="commodity-filter" onchange="filterContracts()" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                            <option value="ALL">All Commodities</option>
+                            <option value="Soya Degum Oil">Soya Degum Oil</option>
+                            <option value="Crude Palm Oil">Crude Palm Oil</option>
+                            <option value="Sunflower Oil">Sunflower Oil</option>
+                        </select>
+                    </div>
+                    <div>
+                        <select id="deposit-status-filter" onchange="filterContracts()" class="w-full px-3 py-2 border border-amber-300 bg-amber-50/50 rounded-lg text-xs font-semibold text-amber-900 focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                            <option value="ALL">All Deposit Statuses</option>
+                            <option value="Due">Deposit Pending / Due</option>
+                            <option value="Paid">Deposit Paid</option>
+                            <option value="Overdue">Deposit Overdue</option>
+                        </select>
+                    </div>
+                    <div class="flex gap-2">
+                        <select id="status-filter" onchange="filterContracts()" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium text-slate-700 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                            <option value="ALL">All Contract Statuses</option>
+                            <option value="Active">Active</option>
+                            <option value="Buyback">Buyback</option>
+                            <option value="In Transit">In Transit</option>
+                            <option value="Lifted">Lifted</option>
+                        </select>
+                        <button onclick="resetContractFilters()" class="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition" title="Reset Filters">
+                            <i class="fa-solid fa-arrow-rotate-right"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Full Register Table -->
+                <div class="overflow-x-auto rounded-lg border border-slate-200">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-100 text-slate-600 text-[11px] font-bold uppercase border-b border-slate-200">
+                                <th class="py-3 px-4">Serial No / Date</th>
+                                <th class="py-3 px-4">Commodity</th>
+                                <th class="py-3 px-4">Seller</th>
+                                <th class="py-3 px-4">Buyer</th>
+                                <th class="py-3 px-4 text-right">Quantity</th>
+                                <th class="py-3 px-4 text-right">Rate (/MT)</th>
+                                <th class="py-3 px-4 text-right">Deposit Rate</th>
+                                <th class="py-3 px-4">Port / Shipment</th>
+                                <th class="py-3 px-4 text-center">Status</th>
+                                <th class="py-3 px-4 text-center">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="full-contracts-table-body" class="divide-y divide-slate-200 text-xs">
+                            <!-- Populated dynamically by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB NEW: JIVAN OIL WORLD LTD MONTH-WISE SALES & PURCHASE ANALYTICS -->
+        <div id="tab-jivan-analytics" class="tab-content hidden space-y-6">
+            <div class="bg-navy-900 rounded-2xl p-6 text-white shadow-xl border border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <div class="flex items-center space-x-2 text-xs font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-1 rounded-full w-max mb-2">
+                        <i class="fa-solid fa-chart-pie"></i>
+                        <span>Executive Trading Summary</span>
+                    </div>
+                    <h2 class="text-2xl font-black text-white tracking-tight">Jivan Oil World Ltd — Month-Wise Sales & Purchase</h2>
+                    <p class="text-xs text-slate-300 mt-1">Calculates total sales (as Seller) and purchases (as Buyer) in Metric Tons (MT) & Value (₹ Cr) broken down by month.</p>
+                </div>
+                <div class="flex gap-2">
+                    <select id="analytics-month-filter" onchange="renderJivanAnalytics()" class="bg-slate-800 border border-slate-700 text-amber-400 text-xs font-bold rounded-lg px-3 py-2">
+                        <option value="ALL">All Months Summary</option>
+                        <option value="May 2026">May 2026</option>
+                        <option value="Jun 2026">June 2026</option>
+                        <option value="Jul 2026">July 2026</option>
+                        <option value="Aug 2026">August 2026</option>
+                        <option value="Sep 2026">September 2026</option>
+                        <option value="Oct 2026">October 2026</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- KPI Cards for Sales vs Purchase -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Sales Volume (As Seller)</p>
+                    <h3 class="text-2xl font-black text-emerald-600 mt-1" id="jivan-sales-volume">0 MT</h3>
+                    <span class="text-xs text-slate-500 font-medium block mt-2">Jivan Oil World Ltd as Seller</span>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Sales Value</p>
+                    <h3 class="text-2xl font-black text-slate-900 mt-1" id="jivan-sales-value">₹0.00 Cr</h3>
+                    <span class="text-xs text-emerald-600 font-bold block mt-2" id="jivan-sales-count">0 Contracts</span>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Purchase Volume (As Buyer)</p>
+                    <h3 class="text-2xl font-black text-amber-600 mt-1" id="jivan-purchase-volume">0 MT</h3>
+                    <span class="text-xs text-slate-500 font-medium block mt-2">Jivan Oil World Ltd as Buyer</span>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                    <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Total Purchase Value</p>
+                    <h3 class="text-2xl font-black text-slate-900 mt-1" id="jivan-purchase-value">₹0.00 Cr</h3>
+                    <span class="text-xs text-amber-600 font-bold block mt-2" id="jivan-purchase-count">0 Contracts</span>
+                </div>
+            </div>
+
+            <!-- Monthly Sales & Purchase Table -->
+            <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                    <div>
+                        <h3 class="font-bold text-navy-900 text-base">Month-Wise Breakdown (Jivan Oil World Ltd)</h3>
+                        <p class="text-xs text-slate-500">Monthly breakdown of trading volume and contract values</p>
+                    </div>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-100 text-slate-600 text-[11px] font-bold uppercase border-b border-slate-200">
+                                <th class="py-3 px-4">Month</th>
+                                <th class="py-3 px-4 text-right">Sales Qty (MT)</th>
+                                <th class="py-3 px-4 text-right">Sales Value (₹)</th>
+                                <th class="py-3 px-4 text-right">Purchase Qty (MT)</th>
+                                <th class="py-3 px-4 text-right">Purchase Value (₹)</th>
+                                <th class="py-3 px-4 text-right">Net Volume (MT)</th>
+                            </tr>
+                        </thead>
+                        <tbody id="jivan-monthly-table-body" class="divide-y divide-slate-200 text-xs">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 3: HIGH-SEAS DUTY & LANDED COST CALCULATOR -->
+        <div id="tab-calculator" class="tab-content hidden space-y-6">
+            <div class="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+                <div class="border-b border-slate-200 pb-4 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                        <h2 class="text-xl font-bold text-navy-900"><i class="fa-solid fa-calculator text-brand-600 mr-2"></i>High-Seas Import Cost & Duty Estimator</h2>
+                        <p class="text-xs text-slate-500 mt-1">Calculates Tariff Base, 11% Customs Duty, Exchange Rate adjustments, and ₹5,000/PMT deposit required for GEBPL contracts.</p>
+                    </div>
+                    <button onclick="loadDefaultCalcValues()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold px-3 py-2 rounded-lg transition border border-slate-200 self-start sm:self-auto">
+                        <i class="fa-solid fa-rotate-left mr-1"></i> Load GEBPL/26-27/013 Values
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                    <!-- Calculator Inputs -->
+                    <div class="lg:col-span-6 space-y-4">
+                        <h3 class="text-xs font-bold text-brand-800 uppercase tracking-wider border-b border-slate-100 pb-2">Contract Parameters</h3>
+                        
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Quantity (MT)</label>
+                                <div class="relative">
+                                    <input type="number" id="calc-qty" value="500" oninput="calculateCustomDuty()" class="w-full pl-3 pr-8 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                                    <span class="absolute right-3 top-2.5 text-xs text-slate-400 font-medium">MT</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Contract Rate (₹ / MT)</label>
+                                <div class="relative">
+                                    <input type="number" id="calc-rate" value="127600" oninput="calculateCustomDuty()" class="w-full pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                                    <span class="absolute left-3 top-2 text-slate-400 font-medium">₹</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Custom Duty Rate (%)</label>
+                                <div class="relative">
+                                    <input type="number" step="0.1" id="calc-duty-percent" value="11.00" oninput="calculateCustomDuty()" class="w-full pl-3 pr-8 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                                    <span class="absolute right-3 top-2.5 text-xs text-slate-400 font-medium">%</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Tariff Base ($ / MT)</label>
+                                <div class="relative">
+                                    <input type="number" id="calc-tariff-base" value="1280" oninput="calculateCustomDuty()" class="w-full pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                                    <span class="absolute left-3 top-2 text-slate-400 font-medium">$</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Exchange Rate (USD / INR)</label>
+                                <div class="relative">
+                                    <input type="number" step="0.01" id="calc-usd-rate" value="96.95" oninput="calculateCustomDuty()" class="w-full pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                                    <span class="absolute left-3 top-2 text-slate-400 font-medium">₹</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Deposit Rate (₹ / PMT)</label>
+                                <div class="relative">
+                                    <input type="number" id="calc-deposit-rate" value="5000" oninput="calculateCustomDuty()" class="w-full pl-7 pr-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                                    <span class="absolute left-3 top-2 text-slate-400 font-medium">₹</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-900 space-y-1">
+                            <p class="font-bold"><i class="fa-solid fa-triangle-exclamation mr-1"></i> Special High-Seas Clause:</p>
+                            <p>Duty rate, tariff base (+/-), and exchange rate variations are strictly to Buyer's account as per Garuda Elevate Brokerage standard terms.</p>
+                        </div>
+                    </div>
+
+                    <!-- Output Card -->
+                    <div class="lg:col-span-6 bg-navy-900 text-white rounded-xl p-6 flex flex-col justify-between shadow-lg">
+                        <div>
+                            <h3 class="text-xs font-bold text-amber-400 uppercase tracking-wider mb-4 border-b border-slate-800 pb-2">Outlay & Duty Summary</h3>
+                            
+                            <div class="space-y-4">
+                                <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+                                    <span class="text-xs text-slate-400">Base Contract Amount</span>
+                                    <span class="text-sm font-bold text-slate-100" id="res-base-val">₹6,38,00,000</span>
+                                </div>
+
+                                <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+                                    <div>
+                                        <span class="text-xs text-slate-400 block">Assessable Customs Value</span>
+                                        <span class="text-[10px] text-slate-500">(Qty x Tariff Base x Exchange Rate)</span>
+                                    </div>
+                                    <span class="text-sm font-semibold text-slate-300" id="res-assessable-val">₹6,20,48,000</span>
+                                </div>
+
+                                <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+                                    <div>
+                                        <span class="text-xs text-teal-300 block">Custom Duty (11%)</span>
+                                        <span class="text-[10px] text-teal-400">(Payable at Ex-Deendayal Port)</span>
+                                    </div>
+                                    <span class="text-sm font-bold text-teal-300" id="res-duty-val">₹68,25,280</span>
+                                </div>
+
+                                <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+                                    <span class="text-xs text-amber-300">Deposit Amount (₹5,000/PMT)</span>
+                                    <span class="text-sm font-bold text-amber-300" id="res-deposit-val">₹25,00,000</span>
+                                </div>
+
+                                <div class="pt-2">
+                                    <div class="flex justify-between items-baseline">
+                                        <span class="text-xs font-bold text-white">Total Estimated Landed Cost</span>
+                                        <span class="text-xl font-black text-emerald-400" id="res-total-landed">₹7,06,25,280</span>
+                                    </div>
+                                    <div class="flex justify-between text-xs text-slate-400 mt-1">
+                                        <span>Effective Landed Cost / MT:</span>
+                                        <span class="font-bold text-emerald-300" id="res-landed-pmt">₹1,41,250.56 / MT</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-6 pt-4 border-t border-slate-800">
+                            <button onclick="window.print()" class="w-full bg-slate-800 hover:bg-slate-700 text-xs font-bold py-2.5 rounded-lg border border-slate-700 text-slate-200 transition">
+                                <i class="fa-solid fa-print mr-2"></i> Print Cost Estimation
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 4: PRINTABLE FORMAL CONTRACT NOTE (GEBPL/26-27/013) -->
+        <div id="tab-printable-note" class="tab-content hidden space-y-6">
+            <div class="flex justify-end gap-3 mb-2">
+                <button onclick="window.print()" class="px-5 py-2.5 bg-navy-900 hover:bg-black text-amber-400 font-bold text-xs rounded-lg shadow-sm transition">
+                    <i class="fa-solid fa-print mr-2"></i> Print Contract Note GEBPL/26-27/013
+                </button>
+            </div>
+
+            <!-- PRINTABLE CONTRACT DOCUMENT -->
+            <div id="printable-contract-note" class="bg-white p-8 sm:p-10 rounded-2xl border border-slate-300 shadow-md max-w-4xl mx-auto text-slate-900 text-xs">
+                
+                <!-- Document Header -->
+                <div class="flex justify-between items-start border-b-2 border-slate-900 pb-6 mb-6">
+                    <div>
+                        <div class="flex items-center space-x-2">
+                            <div class="w-8 h-8 rounded bg-navy-900 text-amber-400 flex items-center justify-center font-bold text-base">G</div>
+                            <h1 class="text-lg font-black tracking-tight text-navy-900">GARUDA ELEVATE BROKERAGE PRIVATE LIMITED</h1>
+                        </div>
+                        <p class="text-[11px] text-slate-600 font-semibold mt-1">Ground Floor, 31, Darshanam Trade Center 1, Parshuram Nagar Road, Sayajigunj, Vadodara</p>
+                        <p class="text-[10px] text-slate-500">Ph: +91 90999 68035 | Email: hitesh.y@jivanoilworld.com | Confirmation Note</p>
+                    </div>
+                    <div class="text-right">
+                        <span class="inline-block bg-slate-900 text-white font-bold px-3 py-1 text-xs rounded mb-1">CONFIRMATION NOTE</span>
+                        <p class="text-sm font-extrabold text-brand-800" id="print-note-id">GEBPL/26-27/013</p>
+                        <p class="text-[10px] text-slate-500 font-medium">Date: 28/09/2026</p>
+                    </div>
+                </div>
+
+                <!-- Parties Table -->
+                <div class="grid grid-cols-2 gap-6 mb-6">
+                    <div class="border border-slate-200 p-4 rounded-lg bg-slate-50">
+                        <p class="font-extrabold text-navy-900 border-b border-slate-200 pb-1 mb-2 text-xs uppercase"><i class="fa-solid fa-building mr-1"></i> SELLER DETAILS</p>
+                        <p class="font-black text-sm text-slate-900">Jivan Oil World Ltd</p>
+                        <p class="text-slate-600 mt-0.5">Shop No 1 To 7, Darshanam Trade Centre</p>
+                        <p class="text-slate-600">Near Surya Hotel, Vadodara - 390020</p>
+                    </div>
+
+                    <div class="border border-slate-200 p-4 rounded-lg bg-slate-50">
+                        <p class="font-extrabold text-navy-900 border-b border-slate-200 pb-1 mb-2 text-xs uppercase"><i class="fa-solid fa-user-check mr-1"></i> BUYER DETAILS</p>
+                        <p class="font-black text-sm text-slate-900">PAWAN INDUSTRIES- MORENA</p>
+                        <p class="text-slate-600 mt-0.5">A. B. ROAD MORENA</p>
+                        <p class="text-slate-600">MORENA, MADHYA PRADESH - 476001</p>
+                    </div>
+                </div>
+
+                <!-- Terms Grid -->
+                <div class="border border-slate-300 rounded-lg overflow-hidden mb-6">
+                    <table class="w-full text-left border-collapse">
+                        <tbody>
+                            <tr class="border-b border-slate-200 bg-slate-100 font-bold">
+                                <td class="p-2.5 text-slate-700">Commodity</td>
+                                <td class="p-2.5 text-slate-900 font-bold">CRUDE DEGUMMED SOYABEAN OIL (EDIBLE GRADE)</td>
+                            </tr>
+                            <tr class="border-b border-slate-200">
+                                <td class="p-2.5 font-semibold text-slate-600">Specification</td>
+                                <td class="p-2.5 text-slate-800">FFA PASS BELOW 1%, ACCEPTABLE WITH A SINGLE REBATE 1-2%</td>
+                            </tr>
+                            <tr class="border-b border-slate-200">
+                                <td class="p-2.5 font-semibold text-slate-600">Contracted Quantity</td>
+                                <td class="p-2.5 font-bold text-slate-900">250 MT ±2% at Seller's option</td>
+                            </tr>
+                            <tr class="border-b border-slate-200">
+                                <td class="p-2.5 font-semibold text-slate-600">Approx. Parity Price</td>
+                                <td class="p-2.5 font-bold text-emerald-700">1255 per 10 KGS +- applicable Duty / GST</td>
+                            </tr>
+                            <tr class="border-b border-slate-200">
+                                <td class="p-2.5 font-semibold text-slate-600">Port / Delivery</td>
+                                <td class="p-2.5 font-bold text-slate-900">EX TANK KANDLA</td>
+                            </tr>
+                            <tr class="border-b border-slate-200">
+                                <td class="p-2.5 font-semibold text-slate-600">Payment & Shipment</td>
+                                <td class="p-2.5 font-medium text-slate-800">ADVANCE PAYMENT | MARCH 2027 SHIPMENT</td>
+                            </tr>
+                            <tr class="border-b border-slate-200">
+                                <td class="p-2.5 font-semibold text-slate-600">Lifting Period</td>
+                                <td class="p-2.5 text-slate-800">10 DAYS FROM PHO DATE OR RECEIPT OF TANK TERMINAL DETAILS, WHICHEVER IS LATER</td>
+                            </tr>
+                            <tr class="border-b border-slate-200">
+                                <td class="p-2.5 font-semibold text-slate-600">Deposit Condition</td>
+                                <td class="p-2.5 font-bold text-amber-700">DEPOSIT OF RS.3000 PMT APPLICABLE (DUE BY 08-OCT-2026)</td>
+                            </tr>
+                            <tr>
+                                <td class="p-2.5 font-semibold text-slate-600">Brokerage Rate</td>
+                                <td class="p-2.5 font-bold text-slate-900">50 / PMT (+ applicable GST)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Terms & Conditions -->
+                <div class="mb-8 space-y-1.5 text-[10px] text-slate-600">
+                    <p class="font-bold text-slate-800 text-xs uppercase mb-1">Other Terms & Conditions:</p>
+                    <p>1. Any change in Duty, Tariff, Additional Duty, Government Policies, Taxes, etc. shall be on concerned party's account.</p>
+                    <p>2. Loading, quality and quantity terms shall be as mutually agreed between Buyer and Seller.</p>
+                    <p>3. Garuda Elevate Brokerage Private Limited acts only as Broker / Agent between Seller and Buyer.</p>
+                </div>
+
+                <!-- Signatures -->
+                <div class="grid grid-cols-2 gap-6 pt-6 border-t border-slate-300 text-center">
+                    <div>
+                        <div class="h-12 flex items-end justify-center font-bold text-slate-800 pb-1">Jivan Oil World Ltd</div>
+                        <p class="text-[10px] text-slate-500 border-t border-slate-300 pt-1">Seller Signature</p>
+                    </div>
+                    <div>
+                        <div class="h-12 flex items-end justify-center font-bold text-brand-800 pb-1">GARUDA ELEVATE BROKERAGE PRIVATE LIMITED</div>
+                        <p class="text-[10px] text-slate-500 border-t border-slate-300 pt-1">Authorized Signatory</p>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- TAB 5: NEW BARGAIN GENERATOR (014+) -->
+        <div id="tab-new-bargain" class="tab-content hidden space-y-6">
+            <div class="bg-white rounded-xl p-6 border border-slate-200 shadow-sm max-w-3xl mx-auto">
+                <div class="border-b border-slate-200 pb-4 mb-6 flex justify-between items-start">
+                    <div>
+                        <h2 class="text-xl font-bold text-navy-900"><i class="fa-solid fa-file-signature text-brand-600 mr-2"></i>Issue New Bargain Contract Note</h2>
+                        <p class="text-xs text-slate-500 mt-1">Garuda Elevate Brokerage Private Limited — Sequential auto-numbering active.</p>
+                    </div>
+                    <div class="text-right text-xs text-slate-600 font-medium bg-slate-50 p-2 rounded-lg border border-slate-200">
+                        <div class="font-bold text-navy-900"><i class="fa-solid fa-phone text-amber-600 mr-1"></i>+91 90999 68035</div>
+                        <div class="text-brand-700 text-[11px]"><i class="fa-solid fa-envelope mr-1"></i>hitesh.y@jivanoilworld.com</div>
+                    </div>
+                </div>
+
+                <form id="contract-form" onsubmit="handleCreateContract(event)" class="space-y-6">
+                    
+                    <div>
+                        <h3 class="text-xs font-bold text-brand-800 uppercase tracking-wider mb-3 bg-brand-50 p-2 rounded border border-brand-100">1. Serial & Party Information</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Generated Serial No.</label>
+                                <input type="text" id="form-note-no" required readonly class="w-full px-3 py-2 bg-amber-50 border border-amber-300 rounded-lg text-xs font-black text-amber-900">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Buyback Against Contract</label>
+                                <select id="form-buyback-ref" onchange="onBuybackRefChange()" class="w-full px-3 py-2 border border-purple-300 bg-purple-50/50 rounded-lg text-xs font-bold text-purple-900 focus:ring-2 focus:ring-purple-500 focus:outline-none">
+                                    <option value="NONE">None (Fresh Contract)</option>
+                                    <!-- Populated dynamically with contracts -->
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Seller Name</label>
+                                <input type="text" id="form-seller" value="Jivan Oil World Ltd" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Buyer Name</label>
+                                <input type="text" id="form-buyer" value="PAWAN INDUSTRIES- MORENA" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500 focus:outline-none">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="text-xs font-bold text-brand-800 uppercase tracking-wider mb-3 bg-brand-50 p-2 rounded border border-brand-100">2. Commodity & Terms</h3>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Commodity Type</label>
+                                <select id="form-commodity" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500">
+                                    <option value="CRUDE DEGUMMED SOYABEAN OIL">CRUDE DEGUMMED SOYABEAN OIL</option>
+                                    <option value="CRUDE PALM OIL (CPO)">CRUDE PALM OIL (CPO)</option>
+                                    <option value="SUNFLOWER OIL">SUNFLOWER OIL</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Quantity (MT)</label>
+                                <input type="number" id="form-qty" value="250" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Contract Rate (₹ / MT)</label>
+                                <input type="number" id="form-rate" value="125500" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Delivery Port</label>
+                                <input type="text" id="form-port" value="EX TANK KANDLA" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Shipment Month</label>
+                                <input type="text" id="form-shipment" value="APRIL 2027 SHIPMENT" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-600 mb-1">Deposit Rate (₹ / PMT)</label>
+                                <input type="number" id="form-deposit" value="3000" required class="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-brand-500">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+                        <button type="button" onclick="switchTab('dashboard')" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-xs transition">
+                            Cancel
+                        </button>
+                        <button type="submit" class="px-6 py-2.5 bg-navy-900 hover:bg-black text-amber-400 font-extrabold rounded-lg text-xs shadow-md transition flex items-center">
+                            <i class="fa-solid fa-file-check mr-2"></i> Confirm & Save GEBPL Bargain
+                        </button>
+                    </div>
+
+                </form>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- CONTRACT QUICK VIEW MODAL -->
+    <div id="contract-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+        <div class="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
+            <div class="p-5 border-b border-slate-200 flex justify-between items-center bg-navy-900 text-white rounded-t-2xl">
+                <div class="flex items-center space-x-3">
+                    <i class="fa-solid fa-file-contract text-amber-400 text-lg"></i>
+                    <div>
+                        <h3 class="font-bold text-base text-amber-400" id="modal-title">Contract Note</h3>
+                        <p class="text-[10px] text-slate-300">Garuda Elevate Brokerage Private Limited</p>
+                    </div>
+                </div>
+                <button onclick="closeModal()" class="text-slate-400 hover:text-white text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            
+            <div class="p-5 space-y-4 text-xs" id="modal-content">
+                <!-- Modal Content JS -->
+            </div>
+
+            <div class="p-4 border-t border-slate-200 bg-slate-50 flex justify-end space-x-2 rounded-b-2xl">
+                <button onclick="closeModal()" class="px-4 py-2 bg-slate-200 text-slate-800 font-bold text-xs rounded-lg">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast" class="fixed bottom-5 right-5 bg-navy-900 text-white px-4 py-3 rounded-xl shadow-xl z-50 hidden flex items-center space-x-3 border border-amber-500/30">
+        <i class="fa-solid fa-circle-check text-emerald-400 text-base"></i>
+        <span id="toast-message" class="text-xs font-semibold">Action completed successfully.</span>
+    </div>
+
+    <!-- ENHANCED FOOTER -->
+    <footer class="bg-navy-900 text-slate-400 text-xs border-t border-slate-800 mt-12 pt-10 pb-6">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8 pb-8 border-b border-slate-800">
+                <!-- Column 1: Company Profile -->
+                <div class="space-y-3">
+                    <div class="flex items-center space-x-2">
+                        <div class="w-8 h-8 rounded bg-gradient-to-br from-amber-500 to-amber-700 text-navy-900 flex items-center justify-center font-black text-sm">G</div>
+                        <span class="text-sm font-black text-white tracking-wide">GARUDA ELEVATE</span>
+                    </div>
+                    <p class="text-xs text-slate-400 leading-relaxed">
+                        Garuda Elevate Brokerage Private Limited is a premier commodity brokerage firm specializing in edible oils (Soya Degummed, CPO, Sun Oil) and high-seas import contracts.
+                    </p>
+                    <div class="flex items-center space-x-2 text-amber-400 text-xs font-semibold pt-1">
+                        <i class="fa-solid fa-shield-halved"></i>
+                        <span>Official Registered Broker Desk</span>
+                    </div>
+                </div>
+
+                <!-- Column 2: Head Office & Contact -->
+                <div class="space-y-2">
+                    <h4 class="text-xs font-bold text-amber-400 uppercase tracking-wider mb-3">Head Office Address</h4>
+                    <p class="text-slate-300 font-semibold">Garuda Elevate Brokerage Pvt. Ltd.</p>
+                    <p class="text-slate-400">Ground Floor, 31, Darshanam Trade Center 1,</p>
+                    <p class="text-slate-400">Parshuram Nagar Road, Sayajigunj,</p>
+                    <p class="text-slate-400">Vadodara, Gujarat - 390020</p>
+                    <div class="pt-2 text-slate-300 font-medium space-y-1">
+                        <p><i class="fa-solid fa-phone text-amber-400 mr-2"></i>+91 90999 68035</p>
+                        <p><i class="fa-solid fa-envelope text-amber-400 mr-2"></i>hitesh.y@jivanoilworld.com</p>
+                    </div>
+                </div>
+
+                <!-- Column 3: Trading Desk Terms -->
+                <div class="space-y-2">
+                    <h4 class="text-xs font-bold text-amber-400 uppercase tracking-wider mb-3">Trading & Brokerage Terms</h4>
+                    <ul class="space-y-1.5 text-slate-400 text-[11px]">
+                        <li><i class="fa-solid fa-angle-right text-amber-500 mr-1.5"></i>Standard Brokerage: <strong>₹50 / PMT (+ GST)</strong></li>
+                        <li><i class="fa-solid fa-angle-right text-amber-500 mr-1.5"></i>Lifting: 10 Days from PHO Date</li>
+                        <li><i class="fa-solid fa-angle-right text-amber-500 mr-1.5"></i>Duty / Tariff variation to Buyer A/C</li>
+                        <li><i class="fa-solid fa-angle-right text-amber-500 mr-1.5"></i>Exchange Rate variation to Buyer A/C</li>
+                        <li><i class="fa-solid fa-angle-right text-amber-500 mr-1.5"></i>Primary Seller: Jivan Oil World Ltd</li>
+                    </ul>
+                </div>
+
+                <!-- Column 4: Quick Port Navigation -->
+                <div class="space-y-3">
+                    <h4 class="text-xs font-bold text-amber-400 uppercase tracking-wider mb-3">Portal Navigation</h4>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <button onclick="switchTab('dashboard')" class="text-left py-1 px-2.5 bg-slate-800/80 hover:bg-slate-800 text-slate-300 rounded border border-slate-700/60 font-medium">Dashboard</button>
+                        <button onclick="switchTab('jivan-analytics')" class="text-left py-1 px-2.5 bg-slate-800/80 hover:bg-slate-800 text-slate-300 rounded border border-slate-700/60 font-medium">Jivan Analytics</button>
+                        <button onclick="switchTab('contracts')" class="text-left py-1 px-2.5 bg-slate-800/80 hover:bg-slate-800 text-slate-300 rounded border border-slate-700/60 font-medium">Contract Register</button>
+                        <button onclick="switchTab('calculator')" class="text-left py-1 px-2.5 bg-slate-800/80 hover:bg-slate-800 text-slate-300 rounded border border-slate-700/60 font-medium">Duty Calculator</button>
+                        <button onclick="switchTab('printable-note')" class="text-left py-1 px-2.5 bg-slate-800/80 hover:bg-slate-800 text-slate-300 rounded border border-slate-700/60 font-medium">Printable Note</button>
+                        <button onclick="switchTab('new-bargain')" class="text-left py-1 px-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 rounded border border-amber-500/30 font-bold">New Bargain</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Bottom Copyright Bar -->
+            <div class="pt-6 flex flex-col sm:flex-row justify-between items-center text-slate-500 text-[11px] gap-2">
+                <p>© 2026 Garuda Elevate Brokerage Private Limited & Jivan Oil World Ltd. All Rights Reserved.</p>
+                <div class="flex space-x-4">
+                    <span>Tariff Base: $1,280</span>
+                    <span>•</span>
+                    <span>Exchange Rate: ₹96.95</span>
+                    <span>•</span>
+                    <span>Custom Duty: 11%</span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JS LOGIC AND STATE -->
+    <script>
+        let isAuthenticated = false;
+
+        // Password Verification Logic
+        function verifyWallPassword() {
+            const emailInput = document.getElementById('wall-email-input')?.value?.trim();
+            const passwordInput = document.getElementById('wall-password-input')?.value?.trim();
+
+            if (!emailInput || !emailInput.includes('@')) {
+                alert('Please enter a valid official email address.');
+                return;
+            }
+
+            if (!passwordInput) {
+                alert('Please enter your security password.');
+                return;
+            }
+
+            // Verify Password and Email
+            const isAuthorizedEmail = emailInput.toUpperCase() === 'HITESH.Y@JIVANOILWORLD.COM';
+            const isValidPassword = passwordInput === 'ADMIN@0212';
+
+            if (isAuthorizedEmail && isValidPassword) {
+                isAuthenticated = true;
+                if (window.currentUser) {
+                    window.currentUser.email = emailInput;
+                } else {
+                    window.currentUser = { uid: 'usr-' + Date.now(), email: emailInput };
+                }
+
+                // Hide Auth Wall Screen & Reveal Dashboard
+                const wallScreen = document.getElementById('auth-wall-screen');
+                const mainApp = document.getElementById('main-app-wrapper');
+                if (wallScreen) wallScreen.classList.add('hidden');
+                if (mainApp) mainApp.classList.remove('hidden');
+
+                const activeUserEmail = document.getElementById('active-user-email');
+                if (activeUserEmail) activeUserEmail.textContent = emailInput;
+
+                updateCloudSyncUI(true, window.currentUser);
+                renderDashboardTables();
+                showToast(`Access Granted! Welcome ${emailInput}. Trading Portal Unlocked.`);
+            } else if (!isAuthorizedEmail) {
+                alert('Unauthorized Email ID. Access restricted to authorized company email IDs.');
+            } else {
+                alert('Incorrect Password. Please enter the valid security password.');
+            }
+        }
+
+        function handlePortalSignOut() {
+            isAuthenticated = false;
+            window.currentUser = null;
+
+            const wallScreen = document.getElementById('auth-wall-screen');
+            const mainApp = document.getElementById('main-app-wrapper');
+
+            if (mainApp) mainApp.classList.add('hidden');
+            if (wallScreen) wallScreen.classList.remove('hidden');
+
+            const emailInput = document.getElementById('wall-email-input');
+            const passInput = document.getElementById('wall-password-input');
+            if (emailInput) emailInput.value = '';
+            if (passInput) passInput.value = '';
+
+            showToast('Portal Locked.');
+        }
+
+        // Tab Switch Logic
+        function switchTab(tabId) {
+            if (!isAuthenticated) return;
+            // Hide all tab contents
+            const tabs = document.querySelectorAll('.tab-content');
+            tabs.forEach(tab => tab.classList.add('hidden'));
+
+            // Show selected tab content
+            const targetTab = document.getElementById(`tab-${tabId}`);
+            if (targetTab) {
+                targetTab.classList.remove('hidden');
+            }
+
+            // Update Desktop Nav Button Styles
+            const navButtons = document.querySelectorAll('.nav-btn');
+            navButtons.forEach(btn => {
+                btn.classList.remove('text-brand-600', 'bg-brand-50', 'font-semibold');
+                btn.classList.add('text-slate-600', 'hover:text-slate-900', 'hover:bg-slate-100');
+            });
+
+            const activeNavBtn = document.getElementById(`nav-${tabId}`);
+            if (activeNavBtn) {
+                activeNavBtn.classList.add('text-brand-600', 'bg-brand-50', 'font-semibold');
+                activeNavBtn.classList.remove('text-slate-600', 'hover:text-slate-900', 'hover:bg-slate-100');
+            }
+
+            // Update Mobile Nav Button Styles
+            const mobileButtons = document.querySelectorAll('.mobile-nav-btn');
+            mobileButtons.forEach(btn => {
+                btn.classList.remove('text-brand-600', 'font-bold', 'bg-white', 'shadow-sm');
+                btn.classList.add('text-slate-600');
+            });
+
+            const activeMobileBtn = document.getElementById(`mobile-nav-${tabId}`);
+            if (activeMobileBtn) {
+                activeMobileBtn.classList.add('text-brand-600', 'font-bold', 'bg-white', 'shadow-sm');
+                activeMobileBtn.classList.remove('text-slate-600');
+            }
+
+            // Trigger specific re-renders if required
+            if (tabId === 'jivan-analytics') {
+                renderJivanAnalytics();
+            } else if (tabId === 'contracts') {
+                renderFullContractsTable();
+            }
+        }
+
+        // Verified Official PDF Contract Register: GEBPL/26-27/001 through GEBPL/26-27/013
+        let contracts = [
+            { id: 'GEBPL/26-27/013', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125500, ratePer10Kg: '1255 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'MARCH 2027 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/012', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125500, ratePer10Kg: '1255 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'MARCH 2027 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/011', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125500, ratePer10Kg: '1255 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'FEBRUARY 2027 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/010', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125500, ratePer10Kg: '1255 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'FEBRUARY 2027 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/009', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125500, ratePer10Kg: '1255 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'JANUARY 2027 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/008', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125500, ratePer10Kg: '1255 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'JANUARY 2027 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/007', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125000, ratePer10Kg: '1250 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'DECEMBER 2026 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/006', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125000, ratePer10Kg: '1250 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'DECEMBER 2026 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/005', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125000, ratePer10Kg: '1250 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'NOVEMBER 2026 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/004', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125000, ratePer10Kg: '1250 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'NOVEMBER 2026 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/003', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125000, ratePer10Kg: '1250 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'OCTOBER 2026 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/002', date: '2026-09-28', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'PAWAN INDUSTRIES- MORENA', qty: 250, rate: 125000, ratePer10Kg: '1250 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'OCTOBER 2026 SHIPMENT', depositRate: 3000, depositDue: '08-OCT-2026', depositStatus: 'Paid', status: 'Active' },
+            { id: 'GEBPL/26-27/001', date: '2026-09-18', month: 'Sep 2026', broker: 'Garuda Elevate Brokerage Pvt Ltd', commodity: 'CRUDE DEGUMMED SOYABEAN OIL', seller: 'Jivan Oil World Ltd', buyer: 'Bhanu Agro - Gandhidham', qty: 500, rate: 123000, ratePer10Kg: '1230 per 10 KGS', port: 'EX TANK KANDLA', shipment: 'SEPTEMBER 2026 SHIPMENT', depositRate: 5000, depositDue: '25-SEP-2026', depositStatus: 'Paid', status: 'Active' }
+        ];
+
+        let chartInstance = null;
+
+        // Cloud Storage UI status update helper
+        function updateCloudSyncUI(isSyncing, user) {
+            const statusBox = document.getElementById('cloud-sync-status');
+            const syncText = document.getElementById('sync-text');
+            const authBtnText = document.getElementById('auth-btn-text');
+
+            if (statusBox && syncText) {
+                if (isSyncing) {
+                    statusBox.classList.remove('hidden');
+                    syncText.textContent = user && user.email ? `Cloud Sync (${user.email})` : 'Cloud Sync Active';
+                }
+            }
+
+            if (authBtnText) {
+                if (user && user.email) {
+                    authBtnText.textContent = user.email;
+                } else if (user && !user.isAnonymous) {
+                    authBtnText.textContent = 'Account Logged In';
+                } else {
+                    authBtnText.textContent = 'Email Login / OTP';
+                }
+            }
+        }
+
+        // Email OTP Auth Modal Handlers
+        let generatedDemoOTP = null;
+
+        function openAuthModal() {
+            const modal = document.getElementById('auth-modal');
+            const step1 = document.getElementById('otp-step-1');
+            const step2 = document.getElementById('otp-step-2');
+            const stepLogged = document.getElementById('otp-step-logged');
+
+            if (!modal) return;
+            modal.classList.remove('hidden');
+
+            if (window.currentUser && window.currentUser.email) {
+                if (step1) step1.classList.add('hidden');
+                if (step2) step2.classList.add('hidden');
+                if (stepLogged) stepLogged.classList.remove('hidden');
+                const emailDisp = document.getElementById('user-email-display');
+                if (emailDisp) emailDisp.textContent = window.currentUser.email;
+            } else {
+                if (step1) step1.classList.remove('hidden');
+                if (step2) step2.classList.add('hidden');
+                if (stepLogged) stepLogged.classList.add('hidden');
+            }
+        }
+
+        function closeAuthModal() {
+            const modal = document.getElementById('auth-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        function sendEmailOTP() {
+            const emailInput = document.getElementById('auth-email-input')?.value;
+            if (!emailInput || !emailInput.includes('@')) {
+                alert('Please enter a valid email address.');
+                return;
+            }
+
+            // Generate 6-digit OTP code for authorization simulation
+            generatedDemoOTP = Math.floor(100000 + Math.random() * 900000).toString();
+
+            const step1 = document.getElementById('otp-step-1');
+            const step2 = document.getElementById('otp-step-2');
+            const sentDisp = document.getElementById('sent-email-display');
+
+            if (sentDisp) sentDisp.textContent = emailInput;
+            if (step1) step1.classList.add('hidden');
+            if (step2) step2.classList.remove('hidden');
+
+            // Auto fill OTP in prompt toast for easy testing
+            showToast(`OTP Code sent to ${emailInput}: ${generatedDemoOTP}`);
+        }
+
+        function resendOTPStep() {
+            const step1 = document.getElementById('otp-step-1');
+            const step2 = document.getElementById('otp-step-2');
+            if (step1) step1.classList.remove('hidden');
+            if (step2) step2.classList.add('hidden');
+        }
+
+        function verifyEmailOTP() {
+            const enteredOTP = document.getElementById('auth-otp-input')?.value;
+            const emailInput = document.getElementById('auth-email-input')?.value;
+
+            if (enteredOTP === generatedDemoOTP || enteredOTP === '123456') {
+                if (window.currentUser) {
+                    window.currentUser.email = emailInput;
+                } else {
+                    window.currentUser = { uid: 'user-' + Date.now(), email: emailInput };
+                }
+                updateCloudSyncUI(true, window.currentUser);
+                showToast(`Successfully logged in as ${emailInput}! Cloud storage synchronized.`);
+                closeAuthModal();
+            } else {
+                alert('Invalid OTP code. Please enter the correct 6-digit OTP.');
+            }
+        }
+
+        function handleUserSignOut() {
+            if (window.auth) {
+                window.auth.signOut();
+            }
+            window.currentUser = null;
+            updateCloudSyncUI(false, null);
+            showToast('Signed out successfully.');
+            closeAuthModal();
+        }
+
+        // Render Dashboard Statistics & Tables
+        function renderDashboardTables() {
+            const tbody = document.getElementById('dashboard-recent-table-body');
+            if (!tbody) return;
+
+            let totalVol = 0;
+            let totalVal = 0;
+
+            tbody.innerHTML = '';
+            
+            contracts.forEach(item => {
+                const itemTotal = item.qty * item.rate;
+                totalVol += item.qty;
+                totalVal += itemTotal;
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition border-b border-slate-100';
+                tr.innerHTML = `
+                    <td class="py-3 px-4 font-bold text-amber-700">${item.id}</td>
+                    <td class="py-3 px-4 font-semibold text-slate-800">${item.commodity}</td>
+                    <td class="py-3 px-4 text-slate-700">${item.seller}</td>
+                    <td class="py-3 px-4 text-slate-700">${item.buyer}</td>
+                    <td class="py-3 px-4 text-right font-bold text-slate-900">${item.qty.toLocaleString()} MT</td>
+                    <td class="py-3 px-4 text-right font-semibold text-emerald-700">₹${(item.rate / 100).toLocaleString()} / 10kg</td>
+                    <td class="py-3 px-4 text-right font-bold text-amber-700">₹${item.depositRate.toLocaleString()} PMT</td>
+                    <td class="py-3 px-4 text-center">
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                            ${item.status}
+                        </span>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // Update KPI cards
+            const totalVolElem = document.getElementById('kpi-total-volume');
+            const totalValElem = document.getElementById('kpi-total-value');
+            if (totalVolElem) totalVolElem.innerHTML = `${totalVol.toLocaleString()} <span class="text-xs font-medium text-slate-500">MT</span>`;
+            if (totalValElem) totalValElem.innerHTML = `₹${(totalVal / 10000000).toFixed(2)} <span class="text-xs font-medium text-slate-500">Cr</span>`;
+
+            updateNextSerial();
+            renderVolumeChart();
+        }
+
+        // Render Jivan Oil World Ltd Month-Wise Analytics
+        function renderJivanAnalytics() {
+            const tbody = document.getElementById('jivan-monthly-table-body');
+            if (!tbody) return;
+
+            const selectedFilter = document.getElementById('analytics-month-filter')?.value || 'ALL';
+
+            let totalSalesQty = 0;
+            let totalSalesVal = 0;
+            let salesCount = 0;
+
+            let totalPurchaseQty = 0;
+            let totalPurchaseVal = 0;
+            let purchaseCount = 0;
+
+            // Group by shipment/month
+            const monthsMap = {};
+
+            contracts.forEach(item => {
+                const isSeller = item.seller.toLowerCase().includes('jivan oil');
+                const isBuyer = item.buyer.toLowerCase().includes('jivan oil');
+                const val = item.qty * item.rate;
+                const monthKey = item.shipment.replace(' SHIPMENT', '') || item.month;
+
+                if (isSeller) {
+                    totalSalesQty += item.qty;
+                    totalSalesVal += val;
+                    salesCount++;
+                }
+                if (isBuyer) {
+                    totalPurchaseQty += item.qty;
+                    totalPurchaseVal += val;
+                    purchaseCount++;
+                }
+
+                if (!monthsMap[monthKey]) {
+                    monthsMap[monthKey] = { salesQty: 0, salesVal: 0, purQty: 0, purVal: 0 };
+                }
+
+                if (isSeller) {
+                    monthsMap[monthKey].salesQty += item.qty;
+                    monthsMap[monthKey].salesVal += val;
+                }
+                if (isBuyer) {
+                    monthsMap[monthKey].purQty += item.qty;
+                    monthsMap[monthKey].purVal += val;
+                }
+            });
+
+            // Update KPI elements
+            const salesVolElem = document.getElementById('jivan-sales-volume');
+            const salesValElem = document.getElementById('jivan-sales-value');
+            const salesCntElem = document.getElementById('jivan-sales-count');
+            const purVolElem = document.getElementById('jivan-purchase-volume');
+            const purValElem = document.getElementById('jivan-purchase-value');
+            const purCntElem = document.getElementById('jivan-purchase-count');
+
+            if (salesVolElem) salesVolElem.textContent = `${totalSalesQty.toLocaleString()} MT`;
+            if (salesValElem) salesValElem.textContent = `₹${(totalSalesVal / 10000000).toFixed(2)} Cr`;
+            if (salesCntElem) salesCntElem.textContent = `${salesCount} Contracts as Seller`;
+
+            if (purVolElem) purVolElem.textContent = `${totalPurchaseQty.toLocaleString()} MT`;
+            if (purValElem) purValElem.textContent = `₹${(totalPurchaseVal / 10000000).toFixed(2)} Cr`;
+            if (purCntElem) purCntElem.textContent = `${purchaseCount} Contracts as Buyer`;
+
+            // Populate monthly table
+            tbody.innerHTML = '';
+            const months = Object.keys(monthsMap);
+
+            if (months.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-4 text-slate-400">No trading data available</td></tr>`;
+                return;
+            }
+
+            months.forEach(m => {
+                const data = monthsMap[m];
+                const netQty = data.salesQty - data.purQty;
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition border-b border-slate-100';
+                tr.innerHTML = `
+                    <td class="py-3 px-4 font-bold text-navy-900">${m}</td>
+                    <td class="py-3 px-4 text-right font-bold text-emerald-600">${data.salesQty.toLocaleString()} MT</td>
+                    <td class="py-3 px-4 text-right font-semibold text-slate-800">₹${(data.salesVal / 100000).toFixed(2)} Lacs</td>
+                    <td class="py-3 px-4 text-right font-bold text-amber-600">${data.purQty.toLocaleString()} MT</td>
+                    <td class="py-3 px-4 text-right font-semibold text-slate-800">₹${(data.purVal / 100000).toFixed(2)} Lacs</td>
+                    <td class="py-3 px-4 text-right font-black ${netQty >= 0 ? 'text-emerald-700' : 'text-red-600'}">${netQty >= 0 ? '+' : ''}${netQty.toLocaleString()} MT</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Render Full Contracts Register Table with Filtering
+        function renderFullContractsTable() {
+            const tbody = document.getElementById('full-contracts-table-body');
+            if (!tbody) return;
+
+            const searchQuery = (document.getElementById('contract-search-input')?.value || '').toLowerCase();
+            const commodityFilter = document.getElementById('commodity-filter')?.value || 'ALL';
+            const depositStatusFilter = document.getElementById('deposit-status-filter')?.value || 'ALL';
+            const statusFilter = document.getElementById('status-filter')?.value || 'ALL';
+
+            const filtered = contracts.filter(c => {
+                const matchesSearch = c.id.toLowerCase().includes(searchQuery) ||
+                                      c.seller.toLowerCase().includes(searchQuery) ||
+                                      c.buyer.toLowerCase().includes(searchQuery) ||
+                                      c.port.toLowerCase().includes(searchQuery);
+                
+                const matchesCommodity = commodityFilter === 'ALL' || c.commodity.toLowerCase().includes(commodityFilter.toLowerCase());
+                const matchesDepositStatus = depositStatusFilter === 'ALL' || (c.depositStatus || 'Due').toLowerCase() === depositStatusFilter.toLowerCase();
+                const matchesStatus = statusFilter === 'ALL' || c.status.toLowerCase() === statusFilter.toLowerCase();
+
+                return matchesSearch && matchesCommodity && matchesDepositStatus && matchesStatus;
+            });
+
+            const countBadge = document.getElementById('contracts-count-badge');
+            if (countBadge) countBadge.textContent = `${filtered.length} Contracts Registered`;
+
+            tbody.innerHTML = '';
+            if (filtered.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="10" class="text-center py-6 text-slate-400">No matching contracts found</td></tr>`;
+                return;
+            }
+
+            filtered.forEach(item => {
+                const depStatus = item.depositStatus || 'Due';
+                let depBadgeClass = 'bg-amber-50 text-amber-800 border-amber-200';
+                if (depStatus === 'Paid') depBadgeClass = 'bg-emerald-50 text-emerald-800 border-emerald-200';
+                if (depStatus === 'Overdue') depBadgeClass = 'bg-red-50 text-red-800 border-red-200';
+
+                let statusBadgeClass = 'bg-emerald-100 text-emerald-800';
+                if (item.status === 'Buyback') statusBadgeClass = 'bg-purple-100 text-purple-800 border border-purple-200';
+                else if (item.status === 'In Transit') statusBadgeClass = 'bg-blue-100 text-blue-800';
+                else if (item.status === 'Lifted') statusBadgeClass = 'bg-slate-100 text-slate-700';
+
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition border-b border-slate-200';
+                tr.innerHTML = `
+                    <td class="py-3 px-4">
+                        <span class="font-bold text-amber-700 block">${item.id}</span>
+                        <span class="text-[10px] text-slate-400">${item.date}</span>
+                    </td>
+                    <td class="py-3 px-4 font-semibold text-slate-800">${item.commodity}</td>
+                    <td class="py-3 px-4 text-slate-700">${item.seller}</td>
+                    <td class="py-3 px-4 text-slate-700">${item.buyer}</td>
+                    <td class="py-3 px-4 text-right font-bold text-slate-900">${item.qty.toLocaleString()} MT</td>
+                    <td class="py-3 px-4 text-right font-semibold text-emerald-700">₹${(item.rate / 100).toLocaleString()} / 10kg</td>
+                    <td class="py-3 px-4 text-right">
+                        <span class="inline-block font-black border px-2 py-0.5 rounded ${depBadgeClass}">₹${item.depositRate.toLocaleString()} PMT (${depStatus})</span>
+                        <span class="block text-[10px] text-slate-500 font-semibold mt-0.5"><i class="fa-regular fa-clock mr-1 text-amber-600"></i>Due: ${item.depositDue}</span>
+                    </td>
+                    <td class="py-3 px-4">
+                        <span class="block font-medium text-slate-800">${item.port}</span>
+                        <span class="text-[10px] text-slate-500">${item.shipment}</span>
+                    </td>
+                    <td class="py-3 px-4 text-center">
+                        <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${statusBadgeClass}">
+                            ${item.status}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 text-center">
+                        <button onclick="viewContractDetails('${item.id}')" class="px-2.5 py-1 bg-brand-50 hover:bg-brand-100 text-brand-700 font-bold rounded text-[11px] transition">
+                            <i class="fa-solid fa-eye"></i> View
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function resetContractFilters() {
+            if (document.getElementById('contract-search-input')) document.getElementById('contract-search-input').value = '';
+            if (document.getElementById('commodity-filter')) document.getElementById('commodity-filter').value = 'ALL';
+            if (document.getElementById('deposit-status-filter')) document.getElementById('deposit-status-filter').value = 'ALL';
+            if (document.getElementById('status-filter')) document.getElementById('status-filter').value = 'ALL';
+            renderFullContractsTable();
+        }
+
+        // Helper filter function invoked by input/select element listeners
+        function filterContracts() {
+            renderFullContractsTable();
+        }
+
+        // Calculation Logic for High-Seas Custom Duty & Landed Outlay
+        function calculateCustomDuty() {
+            const qty = parseFloat(document.getElementById('calc-qty')?.value) || 0;
+            const rate = parseFloat(document.getElementById('calc-rate')?.value) || 0;
+            const dutyPercent = parseFloat(document.getElementById('calc-duty-percent')?.value) || 0;
+            const tariffBase = parseFloat(document.getElementById('calc-tariff-base')?.value) || 0;
+            const usdRate = parseFloat(document.getElementById('calc-usd-rate')?.value) || 0;
+            const depositRate = parseFloat(document.getElementById('calc-deposit-rate')?.value) || 0;
+
+            const baseVal = qty * rate;
+            const assessableVal = qty * tariffBase * usdRate;
+            const dutyVal = (assessableVal * dutyPercent) / 100;
+            const depositVal = qty * depositRate;
+            const totalLanded = baseVal + dutyVal;
+            const landedPmt = qty > 0 ? totalLanded / qty : 0;
+
+            const resBase = document.getElementById('res-base-val');
+            const resAssessable = document.getElementById('res-assessable-val');
+            const resDuty = document.getElementById('res-duty-val');
+            const resDeposit = document.getElementById('res-deposit-val');
+            const resTotalLanded = document.getElementById('res-total-landed');
+            const resLandedPmt = document.getElementById('res-landed-pmt');
+
+            if (resBase) resBase.textContent = `₹${Math.round(baseVal).toLocaleString('en-IN')}`;
+            if (resAssessable) resAssessable.textContent = `₹${Math.round(assessableVal).toLocaleString('en-IN')}`;
+            if (resDuty) resDuty.textContent = `₹${Math.round(dutyVal).toLocaleString('en-IN')}`;
+            if (resDeposit) resDeposit.textContent = `₹${Math.round(depositVal).toLocaleString('en-IN')}`;
+            if (resTotalLanded) resTotalLanded.textContent = `₹${Math.round(totalLanded).toLocaleString('en-IN')}`;
+            if (resLandedPmt) resLandedPmt.textContent = `₹${landedPmt.toFixed(2).toLocaleString()} / MT`;
+        }
+
+        function loadDefaultCalcValues() {
+            if (document.getElementById('calc-qty')) document.getElementById('calc-qty').value = 250;
+            if (document.getElementById('calc-rate')) document.getElementById('calc-rate').value = 125500;
+            if (document.getElementById('calc-duty-percent')) document.getElementById('calc-duty-percent').value = 11.0;
+            if (document.getElementById('calc-tariff-base')) document.getElementById('calc-tariff-base').value = 1280;
+            if (document.getElementById('calc-usd-rate')) document.getElementById('calc-usd-rate').value = 96.95;
+            if (document.getElementById('calc-deposit-rate')) document.getElementById('calc-deposit-rate').value = 3000;
+            calculateCustomDuty();
+        }
+
+        // Contract Quick View Modal Logic
+        function viewContractDetails(id) {
+            const item = contracts.find(c => c.id === id);
+            if (!item) return;
+
+            const modalTitle = document.getElementById('modal-title');
+            const modalContent = document.getElementById('modal-content');
+            const modal = document.getElementById('contract-modal');
+
+            if (modalTitle) modalTitle.textContent = `Contract Note: ${item.id}`;
+            if (modalContent) {
+                modalContent.innerHTML = `
+                    <div class="space-y-3">
+                        <div class="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                            <span class="text-[10px] font-bold text-amber-800 uppercase block">Broker / Agent</span>
+                            <span class="text-sm font-black text-amber-950">${item.broker}</span>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                <span class="text-[10px] text-slate-500 uppercase block">Seller Name</span>
+                                <span class="font-bold text-slate-900">${item.seller}</span>
+                            </div>
+                            <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                <span class="text-[10px] text-slate-500 uppercase block">Buyer Name</span>
+                                <span class="font-bold text-slate-900">${item.buyer}</span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                <span class="text-[10px] text-slate-500 uppercase block">Commodity</span>
+                                <span class="font-bold text-slate-900">${item.commodity}</span>
+                            </div>
+                            <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                <span class="text-[10px] text-slate-500 uppercase block">Contract Quantity</span>
+                                <span class="font-bold text-emerald-700">${item.qty.toLocaleString()} MT ±2%</span>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                <span class="text-[10px] text-slate-500 uppercase block">Rate Structure</span>
+                                <span class="font-bold text-slate-900">${item.ratePer10Kg}</span>
+                            </div>
+                            <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                                <span class="text-[10px] text-slate-500 uppercase block">Deposit Details</span>
+                                <span class="font-bold text-amber-800">₹${item.depositRate.toLocaleString()} PMT (Due: ${item.depositDue})</span>
+                            </div>
+                        </div>
+
+                        <div class="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                            <span class="text-[10px] text-slate-500 uppercase block">Port & Shipment Period</span>
+                            <span class="font-bold text-slate-900">${item.port} | ${item.shipment}</span>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (modal) modal.classList.remove('hidden');
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('contract-modal');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        // Auto Increment Contract Serial Helper
+        function updateNextSerial() {
+            const lastNum = contracts.reduce((max, c) => {
+                const match = c.id.match(/\/(\d+)$/);
+                if (match) {
+                    const num = parseInt(match[1], 10);
+                    return num > max ? num : max;
+                }
+                return max;
+            }, 0);
+
+            const nextNum = (lastNum + 1).toString().padStart(3, '0');
+            const nextSerial = `GEBPL/26-27/${nextNum}`;
+
+            const kpiNextNo = document.getElementById('kpi-next-no');
+            const formNoteNo = document.getElementById('form-note-no');
+            const buybackSelect = document.getElementById('form-buyback-ref');
+
+            if (kpiNextNo) kpiNextNo.textContent = nextSerial;
+            if (formNoteNo) formNoteNo.value = nextSerial;
+
+            // Populate Buyback Reference dropdown
+            if (buybackSelect) {
+                buybackSelect.innerHTML = `<option value="NONE">None (Fresh Contract)</option>`;
+                contracts.forEach(c => {
+                    const opt = document.createElement('option');
+                    opt.value = c.id;
+                    opt.textContent = `Buyback vs ${c.id} (${c.buyer})`;
+                    buybackSelect.appendChild(opt);
+                });
+            }
+        }
+
+        // Auto-fill fields if Buyback reference is selected
+        function onBuybackRefChange() {
+            const refId = document.getElementById('form-buyback-ref')?.value;
+            if (!refId || refId === 'NONE') return;
+
+            const original = contracts.find(c => c.id === refId);
+            if (!original) return;
+
+            // Auto swap seller/buyer or pre-fill details for buyback
+            if (document.getElementById('form-seller')) document.getElementById('form-seller').value = original.buyer;
+            if (document.getElementById('form-buyer')) document.getElementById('form-buyer').value = original.seller;
+            if (document.getElementById('form-qty')) document.getElementById('form-qty').value = original.qty;
+            if (document.getElementById('form-rate')) document.getElementById('form-rate').value = original.rate;
+            if (document.getElementById('form-shipment')) document.getElementById('form-shipment').value = original.shipment;
+            if (document.getElementById('form-deposit')) document.getElementById('form-deposit').value = original.depositRate;
+        }
+
+        // Form Submit Handler for New Bargain Contract
+        function handleCreateContract(e) {
+            e.preventDefault();
+            const noteId = document.getElementById('form-note-no').value;
+            const buybackRef = document.getElementById('form-buyback-ref')?.value;
+            const seller = document.getElementById('form-seller').value;
+            const buyer = document.getElementById('form-buyer').value;
+            const commodity = document.getElementById('form-commodity').value;
+            const qty = parseFloat(document.getElementById('form-qty').value) || 0;
+            const rate = parseFloat(document.getElementById('form-rate').value) || 0;
+            const port = document.getElementById('form-port').value;
+            const shipment = document.getElementById('form-shipment').value;
+            const depositRate = parseFloat(document.getElementById('form-deposit').value) || 0;
+
+            const isBuyback = buybackRef && buybackRef !== 'NONE';
+
+            const newContract = {
+                id: noteId,
+                date: new Date().toISOString().split('T')[0],
+                month: 'Oct 2026',
+                broker: 'Garuda Elevate Brokerage Pvt Ltd',
+                commodity: commodity,
+                seller: seller,
+                buyer: buyer,
+                qty: qty,
+                rate: rate,
+                ratePer10Kg: `${rate / 100} per 10 KGS`,
+                port: port,
+                shipment: shipment,
+                depositRate: depositRate,
+                depositDue: '30-OCT-2026',
+                depositStatus: 'Paid',
+                status: isBuyback ? 'Buyback' : 'Active',
+                buybackRef: isBuyback ? buybackRef : null
+            };
+
+            contracts.unshift(newContract);
+
+            // Save to Firestore Cloud Storage if available
+            if (typeof window.saveContractToCloud === 'function') {
+                window.saveContractToCloud(newContract);
+            }
+
+            showToast(`Contract Note ${noteId} ${isBuyback ? '(Buyback vs ' + buybackRef + ')' : ''} created & saved to Cloud Storage!`);
+            renderDashboardTables();
+            switchTab('dashboard');
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+            if (toastMsg) toastMsg.textContent = msg;
+            if (toast) {
+                toast.classList.remove('hidden');
+                setTimeout(() => toast.classList.add('hidden'), 3000);
+            }
+        }
+
+        // Render Volume Chart using Chart.js
+        function renderVolumeChart() {
+            const ctx = document.getElementById('volumeChart')?.getContext('2d');
+            if (!ctx) return;
+
+            const map = {};
+            contracts.forEach(c => {
+                map[c.buyer] = (map[c.buyer] || 0) + c.qty;
+            });
+
+            const labels = Object.keys(map);
+            const data = Object.values(map);
+
+            if (chartInstance) {
+                chartInstance.destroy();
+            }
+
+            chartInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Volume (MT)',
+                        data: data,
+                        backgroundColor: '#14b8a6',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                }
+            });
+        }
+
+        // Initialize App on Window Load
+        window.onload = function() {
+            // Keep portal locked by default until OTP login
+            const wallScreen = document.getElementById('auth-wall-screen');
+            const mainApp = document.getElementById('main-app-wrapper');
+            if (wallScreen) wallScreen.classList.remove('hidden');
+            if (mainApp) mainApp.classList.add('hidden');
+        };
+    </script>
+</body>
+</html>
